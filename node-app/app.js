@@ -14,6 +14,8 @@ const PORT = process.env.PORT || 3000;
 const jwt = require("jsonwebtoken"); // JWT 라이브러리 추가
 const auth = require("./middleware/auth"); // 미들웨어 가져오기
 const cookieParser = require("cookie-parser");
+const AWS = require("aws-sdk"); // AWS SDK 추가
+const multer = require("multer"); // multer 추가
 
 // PostgreSQL 연결 설정
 const pool = new Pool({
@@ -22,6 +24,13 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
   port: process.env.DB_PORT,
+});
+
+// AWS S3 설정
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION,
 });
 
 // CORS 설정
@@ -110,16 +119,43 @@ app.post("/api/register", async (req, res) => {
 });
 
 // 프로젝트 등록 API
-app.post("/api/projects", async (req, res) => {
-  const { title, user_id, url, thumbnail, description } = req.body;
+const upload = multer();
+app.post("/api/projects", upload.single("thumbnail"), async (req, res) => {
+  const { title, user_id, url, description } = req.body; // FormData에서 값 추출
+  const thumbnail = req.file; // multer를 사용하여 파일을 가져옴
 
   try {
+    // 동일한 프로젝트 이름이 존재하는지 확인
+    const existingProject = await pool.query(
+      "SELECT * FROM projects WHERE title = $1 AND user_id = $2",
+      [title, user_id]
+    );
+
+    if (existingProject.rowCount > 0) {
+      return res.status(409).json({ message: "동일한 프로젝트 이름이 이미 존재합니다." });
+    }
+
+    let thumbnailUrl = "";
+
+    // 이미지 파일이 존재할 경우 S3에 업로드
+    if (thumbnail) {
+      const params = {
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key: `${user_id}/${title}`, // 파일 이름 설정
+        Body: thumbnail.buffer, // 파일 데이터
+        ContentType: thumbnail.mimetype, // 파일 MIME 타입
+      };
+
+      const s3Response = await s3.upload(params).promise();
+      thumbnailUrl = s3Response.Location; // S3에서 반환된 파일 URL
+    }
+
     // 프로젝트 정보 등록
     const result = await pool.query(INSERT_PROJECT_QUERY, [
       title,
       user_id,
       url,
-      thumbnail,
+      thumbnailUrl, // S3에서 업로드한 이미지 URL 사용
       description,
     ]);
     const newProject = result.rows[0];
@@ -271,13 +307,34 @@ app.delete("/api/projects/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    const result = await pool.query(
+    // 프로젝트 정보 조회
+    const projectResult = await pool.query(
+      "SELECT * FROM projects WHERE id = $1",
+      [id]
+    );
+
+    if (projectResult.rowCount === 0) {
+      return res.status(404).json({ message: "프로젝트를 찾을 수 없습니다." });
+    }
+
+    const project = projectResult.rows[0];
+
+    // 썸네일이 존재할 경우 S3에서 삭제
+    if (project.thumbnail) {
+      const params = {
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key: `${project.user_id}/${project.title}`, // 파일 이름 규칙에 맞게 설정
+      };
+
+      await s3.deleteObject(params).promise(); // S3에서 파일 삭제
+    }
+
+    // 프로젝트 삭제
+    const deleteResult = await pool.query(
       "DELETE FROM projects WHERE id = $1 RETURNING *",
       [id]
     );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ message: "프로젝트를 찾을 수 없습니다." });
-    }
+
     return res.status(200).json({ message: "프로젝트 삭제 성공" });
   } catch (error) {
     console.error("Error deleting project:", error);
