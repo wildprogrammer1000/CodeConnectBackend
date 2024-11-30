@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: codeconnect_postgres
+    environment:
+      POSTGRES_USER: admin # PostgreSQL 사용자 이름
+      POSTGRES_PASSWORD: test # PostgreSQL 비밀번호
+      POSTGRES_DB: codeconnect # 초기 데이터베이스 이름
+    ports:
+      - "5432:5432" # 호스트의 5432 포트를 컨테이너의 5432 포트에 매핑
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  node:
+    build:
+      context: ./node-app # Node.js 애플리케이션의 경로
+      dockerfile: Dockerfile # Dockerfile 이름
+    container_name: codeconnect_node
+    ports:
+      - "3001:3001" # 호스트의 3001 포트를 컨테이너의 3001 포트에 매핑
+    depends_on:
+      - postgres # Node.js가 PostgreSQL에 의존함
+
+volumes:
+  postgres_data:
