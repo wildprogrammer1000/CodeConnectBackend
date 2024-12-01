@@ -110,6 +110,22 @@ app.post("/api/register", async (req, res) => {
       nickname,
     ]);
     const newUser = result.rows[0];
+    // JWT 생성
+    const token = jwt.sign(
+      { user_id: newUser.user_id, id: newUser.id },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "1h", // 토큰 만료 시간 설정
+      }
+    );
+
+    // 로그인 성공 시 쿠키에 JWT 저장
+    res.cookie("token", token, {
+      httpOnly: true, // JavaScript에서 접근 불가
+      secure: true, // HTTPS에서만 전송
+      sameSite: "None",
+      maxAge: 3600000, // 1시간
+    });
 
     return res.status(201).json({ message: "회원가입 성공", user: newUser });
   } catch (error) {
@@ -132,7 +148,9 @@ app.post("/api/projects", upload.single("thumbnail"), async (req, res) => {
     );
 
     if (existingProject.rowCount > 0) {
-      return res.status(409).json({ message: "동일한 프로젝트 이름이 이미 존재합니다." });
+      return res
+        .status(409)
+        .json({ message: "동일한 프로젝트 이름이 이미 존재합니다." });
     }
 
     let thumbnailUrl = "";
