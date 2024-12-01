@@ -8,6 +8,7 @@ const {
   INSERT_PROJECT_QUERY,
   INSERT_COMMENT_QUERY,
   GET_COMMENTS_QUERY,
+  GET_PROJECT_BY_ID_QUERY,
 } = require("./query"); // 쿼리 파일 가져오기
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -228,26 +229,7 @@ app.get("/api/projects/:id", auth, async (req, res) => {
   const userId = req.user ? req.user.user_id : null; // req.user에서 사용자 ID 가져오기
 
   try {
-    const result = await pool.query(
-      `
-      SELECT p.*, 
-             u.nickname, 
-             COUNT(DISTINCT l2.id) AS like_count,  -- likes 테이블의 행 개수를 like_count로 추출
-             COUNT(DISTINCT c.id) AS comment_count,
-             CASE 
-               WHEN COUNT(l.id) > 0 THEN TRUE 
-               ELSE FALSE 
-             END AS liked
-      FROM projects p 
-      JOIN users u ON p.user_id = u.user_id
-      LEFT JOIN likes l ON p.id = l.project_id AND l.user_id = $1  -- 현재 사용자 ID로 좋아요 여부 확인
-      LEFT JOIN likes l2 ON p.id = l2.project_id
-      LEFT JOIN comments c ON p.id = c.project_id
-      WHERE p.id = $2
-      GROUP BY p.id, u.nickname
-      ORDER BY p.created_at DESC`,
-      [userId, id]
-    );
+    const result = await pool.query(GET_PROJECT_BY_ID_QUERY, [userId, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "프로젝트를 찾을 수 없습니다." });
@@ -416,21 +398,10 @@ app.post("/api/like", auth, async (req, res) => {
     }
 
     // 좋아요 처리 후 해당 프로젝트의 최신 데이터 가져오기
-    const projectResult = await pool.query(
-      `
-      SELECT p.*, 
-             COUNT(DISTINCT l.id) AS like_count, 
-             CASE 
-               WHEN l.user_id IS NOT NULL THEN TRUE 
-               ELSE FALSE 
-             END AS liked
-      FROM projects p 
-      LEFT JOIN likes l ON p.id = l.project_id
-      WHERE p.id = $1
-      GROUP BY p.id, l.user_id
-    `,
-      [projectId]
-    );
+    const projectResult = await pool.query(GET_PROJECT_BY_ID_QUERY, [
+      userId,
+      projectId,
+    ]);
 
     if (projectResult.rows.length === 0) {
       return res.status(404).json({ message: "프로젝트를 찾을 수 없습니다." });
